@@ -6,6 +6,7 @@ import {
   adminLogout,
   getQuizAdminToken,
   setQuizAdminToken,
+  subscribeAdminUnauthorized,
 } from "../../api/quizApi";
 
 export function useAdminAuth() {
@@ -17,25 +18,39 @@ export function useAdminAuth() {
   const [loginError, setLoginError] = useState(null);
   const [loginLoading, setLoginLoading] = useState(false);
 
+  const applyLoggedOut = useCallback(() => {
+    setAuthenticated(false);
+    setLoginOpen(true);
+    setPassword("");
+    setLoginError(null);
+  }, []);
+
   const checkAuth = useCallback(async () => {
     if (!getQuizAdminToken()) {
-      setAuthenticated(false);
+      applyLoggedOut();
       setCheckingAuth(false);
-      setLoginOpen(true);
       return;
     }
     const result = await adminCheckAuth();
-    setAuthenticated(result.ok && result.data?.authenticated);
     setCheckingAuth(false);
     if (!result.ok || !result.data?.authenticated) {
       setQuizAdminToken("");
-      setLoginOpen(true);
+      applyLoggedOut();
+      return;
     }
-  }, []);
+    setAuthenticated(true);
+    setLoginOpen(false);
+  }, [applyLoggedOut]);
 
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
+
+  useEffect(() => {
+    return subscribeAdminUnauthorized(() => {
+      applyLoggedOut();
+    });
+  }, [applyLoggedOut]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -58,8 +73,7 @@ export function useAdminAuth() {
   const handleLogout = async () => {
     await adminLogout();
     setQuizAdminToken("");
-    setAuthenticated(false);
-    setLoginOpen(true);
+    applyLoggedOut();
   };
 
   return {

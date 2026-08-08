@@ -53,10 +53,11 @@ const AdminQuestionsPage = () => {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterDifficulty, setFilterDifficulty] = useState("");
   const [filterActive, setFilterActive] = useState("");
-  const [search, setSearch] = useState("");
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -66,6 +67,11 @@ const AdminQuestionsPage = () => {
 
   const [deleteTarget, setDeleteTarget] = useState(null);
 
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(handle);
+  }, [search]);
+
   const loadQuestions = useCallback(async () => {
     setLoading(true);
     setListError(null);
@@ -73,7 +79,7 @@ const AdminQuestionsPage = () => {
       category: filterCategory || undefined,
       difficulty: filterDifficulty || undefined,
       active: filterActive || undefined,
-      search: search || undefined,
+      search: debouncedSearch || undefined,
     });
     setLoading(false);
 
@@ -82,7 +88,7 @@ const AdminQuestionsPage = () => {
       return;
     }
     setQuestions(result.data?.questions || []);
-  }, [filterCategory, filterDifficulty, filterActive, search, t]);
+  }, [filterCategory, filterDifficulty, filterActive, debouncedSearch, t]);
 
   useEffect(() => {
     loadQuestions();

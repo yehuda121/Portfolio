@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import '../HomePage/HomePage.css';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +6,16 @@ import { useTranslation } from 'react-i18next';
 function Homepage() {
   const [showAllProjects, setShowAllProjects] = useState(false);
   const { t } = useTranslation();
+
+  const coursework = useMemo(() => {
+    const items = t('homepage.educationCoursework', { returnObjects: true });
+    return Array.isArray(items) ? items : [];
+  }, [t]);
+
+  const trainingTopics = useMemo(() => {
+    const items = t('homepage.educationTopics', { returnObjects: true });
+    return Array.isArray(items) ? items : [];
+  }, [t]);
 
   return (
     <div className="homepage">
@@ -42,17 +52,6 @@ function Homepage() {
               {t('homepage.degreeButton')}
             </Link>
 
-            <button
-              type="button"
-              onClick={() => {
-                const el = document.getElementById('contact-section');
-                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              }}
-              className="homepage-btn homepage-btn-secondary"
-            >
-              {t('homepage.contactButton')}
-            </button>
-
             <a
               href="https://www.linkedin.com/in/yehuda-shmulevitz/"
               target="_blank"
@@ -66,9 +65,29 @@ function Homepage() {
       </section>
 
       <section className="homepage-sections">
-        <div className="homepage-card" id="projects-section">
+        <div className="homepage-card homepage-anchor" id="projects-section">
           <h2 className="homepage-card-title">{t('homepage.projectsTitle')}</h2>
-          <p className="homepage-card-subtitle">{t('homepage.projectsSubtitle')}</p>
+
+          <div className="homepage-project">
+            <h3>{t('homepage.projectPayrollTitle')}</h3>
+            <p>{t('homepage.projectPayrollDesc')}</p>
+            <p className="homepage-project-tech">{t('homepage.projectPayrollTech')}</p>
+          </div>
+
+          <div className="homepage-project">
+            <h3>{t('homepage.projectAssistantTitle')}</h3>
+            <p>{t('homepage.projectAssistantDesc')}</p>
+            <p className="homepage-project-tech">{t('homepage.projectAssistantTech')}</p>
+            <div className="homepage-project-links">
+              <a
+                href="https://github.com/yehuda121/Smart-Employee-Assistant"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t('homepage.viewOnGithub')}
+              </a>
+            </div>
+          </div>
 
           <div className="homepage-project">
             <h3>{t('homepage.projectMesayaTitle')}</h3>
@@ -93,49 +112,34 @@ function Homepage() {
             </div>
           </div>
 
-          <div className="homepage-project">
-            <h3>{t('homepage.projectAssistantTitle')}</h3>
-            <p>{t('homepage.projectAssistantDesc')}</p>
-            <p className="homepage-project-tech">{t('homepage.projectAssistantTech')}</p>
-            <div className="homepage-project-links">
-              <a
-                href="https://github.com/yehuda121/Smart-Employee-Assistant"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {t('homepage.viewOnGithub')}
-              </a>
-            </div>
-          </div>
-
-          <div className="homepage-project">
-            <h3>{t('homepage.projectHeartTitle')}</h3>
-            <p>{t('homepage.projectHeartDesc')}</p>
-            <p className="homepage-project-tech">{t('homepage.projectHeartTech')}</p>
-            <div className="homepage-project-links">
-              <a href="https://github.com/yehuda121/heart_attack_prediction" target="_blank" rel="noopener noreferrer">
-                {t('homepage.viewOnGithub')}
-              </a>
-            </div>
-          </div>
-
-          <div className="homepage-project">
-            <h3>{t('homepage.projectWarehouseTitle')}</h3>
-            <p>{t('homepage.projectWarehouseDesc')}</p>
-            <p className="homepage-project-tech">{t('homepage.projectWarehouseTech')}</p>
-            <div className="homepage-project-links">
-              <a href="https://quickshop-9702e.web.app/" target="_blank" rel="noopener noreferrer">
-                {t('homepage.projectWarehouseLink')}
-              </a>
-              <span> | </span>
-              <a href="https://github.com/yehuda121/quickshop" target="_blank" rel="noopener noreferrer">
-                {t('homepage.viewOnGithub')}
-              </a>
-            </div>
-          </div>
-
           {showAllProjects && (
             <>
+              <div className="homepage-project">
+                <h3>{t('homepage.projectHeartTitle')}</h3>
+                <p>{t('homepage.projectHeartDesc')}</p>
+                <p className="homepage-project-tech">{t('homepage.projectHeartTech')}</p>
+                <div className="homepage-project-links">
+                  <a href="https://github.com/yehuda121/heart_attack_prediction" target="_blank" rel="noopener noreferrer">
+                    {t('homepage.viewOnGithub')}
+                  </a>
+                </div>
+              </div>
+
+              <div className="homepage-project">
+                <h3>{t('homepage.projectWarehouseTitle')}</h3>
+                <p>{t('homepage.projectWarehouseDesc')}</p>
+                <p className="homepage-project-tech">{t('homepage.projectWarehouseTech')}</p>
+                <div className="homepage-project-links">
+                  <a href="https://quickshop-9702e.web.app/" target="_blank" rel="noopener noreferrer">
+                    {t('homepage.projectWarehouseLink')}
+                  </a>
+                  <span> | </span>
+                  <a href="https://github.com/yehuda121/quickshop" target="_blank" rel="noopener noreferrer">
+                    {t('homepage.viewOnGithub')}
+                  </a>
+                </div>
+              </div>
+
               <div className="homepage-project">
                 <h3>{t('homepage.projectWizardTitle')}</h3>
                 <p>{t('homepage.projectWizardDesc')}</p>
@@ -194,6 +198,54 @@ function Homepage() {
           </div>
         </div>
 
+        <div className="homepage-card homepage-anchor" id="education-section">
+          <h2 className="homepage-card-title">{t('homepage.educationTitle')}</h2>
+
+          <div className="homepage-education-block">
+            <h3 className="homepage-education-heading">{t('homepage.educationDegreeTitle')}</h3>
+            <p className="homepage-education-meta">{t('homepage.educationDegreeSchool')}</p>
+            <p className="homepage-education-gpa">{t('homepage.educationDegreeGpa')}</p>
+            <p className="homepage-card-text">{t('homepage.educationDegreeDesc')}</p>
+
+            <h4 className="homepage-education-subtitle">{t('homepage.educationCourseworkTitle')}</h4>
+            <ul className="homepage-education-list">
+              {coursework.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+
+            <div className="homepage-education-actions">
+              <Link to="/degree" className="homepage-btn homepage-btn-secondary">
+                {t('homepage.degreeButton')}
+              </Link>
+            </div>
+          </div>
+
+          <div className="homepage-education-block homepage-education-block-secondary">
+            <h3 className="homepage-education-heading">{t('homepage.educationTrainingTitle')}</h3>
+            <p className="homepage-education-meta">{t('homepage.educationTrainingHours')}</p>
+            <p className="homepage-card-text">{t('homepage.educationTrainingDesc')}</p>
+
+            <h4 className="homepage-education-subtitle">{t('homepage.educationTopicsTitle')}</h4>
+            <ul className="homepage-education-list">
+              {trainingTopics.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+
+            <div className="homepage-education-actions">
+              <a
+                href={`/${encodeURIComponent('Oz Varuah Certificate.jpeg')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="homepage-btn homepage-btn-secondary"
+              >
+                {t('homepage.certificateButton')}
+              </a>
+            </div>
+          </div>
+        </div>
+
         <div className="homepage-card">
           <h2 className="homepage-card-title">{t('homepage.toolsTitle')}</h2>
           <p className="homepage-card-text">{t('homepage.toolsText')}</p>
@@ -210,9 +262,8 @@ function Homepage() {
           <p className="homepage-card-note">{t('homepage.toolsNote')}</p>
         </div>
 
-        <div className="homepage-card" id="contact-section">
+        <div className="homepage-card homepage-anchor" id="contact-section">
           <h2 className="homepage-card-title">{t('homepage.contactTitle')}</h2>
-          <p className="homepage-card-text">{t('homepage.contactText')}</p>
 
           <ul className="homepage-contact-list">
             <li>

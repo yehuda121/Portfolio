@@ -16,26 +16,8 @@ function calcExpiresAtDays(days) {
   return Math.floor((Date.now() + days * 24 * 60 * 60 * 1000) / 1000);
 }
 
-function requireQuizEnv(res) {
-  const region = process.env.AWS_REGION_DB;
-  const usersTable = process.env.QUIZ_USER_STATS_TABLE;
-  const questionsTable = process.env.QUIZ_QUESTIONS_TABLE;
-
-  if (!region) {
-    res.status(500).json({ ok: false, error: "Missing AWS_REGION_DB" });
-    return null;
-  }
-  if (!usersTable) {
-    res.status(500).json({ ok: false, error: "Missing QUIZ_USER_STATS_TABLE" });
-    return null;
-  }
-
-  return { region, usersTable, questionsTable };
-}
-
 module.exports = {
   getAnonId,
   pickLang,
   calcExpiresAtDays,
-  requireQuizEnv,
 };

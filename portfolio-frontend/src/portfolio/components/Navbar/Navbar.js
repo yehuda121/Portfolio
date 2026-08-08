@@ -3,13 +3,93 @@ import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import './Navbar.css';
 
+const LANDING_SECTIONS = [
+  'projects-section',
+  'education-section',
+  'contact-section',
+];
+
 function Navbar() {
   const location = useLocation();
   const { t, i18n } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState(null);
 
   useEffect(() => {
     setMenuOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname !== '/') {
+      setActiveSection(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    let rafId = 0;
+    let ticking = false;
+
+    const getSpyOffset = () => {
+      const nav = document.querySelector('.navbar');
+      return (nav?.getBoundingClientRect().height || 56) + 8;
+    };
+
+    const updateActiveSection = () => {
+      if (cancelled) return;
+
+      const offset = getSpyOffset();
+      const scrollBottom = window.scrollY + window.innerHeight;
+      const docHeight = document.documentElement.scrollHeight;
+
+      // Near page bottom: Contact may not fill the spy band — force last section
+      if (scrollBottom >= docHeight - 4) {
+        setActiveSection('contact-section');
+        return;
+      }
+
+      let current = null;
+      LANDING_SECTIONS.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.getBoundingClientRect().top - offset <= 0) {
+          current = id;
+        }
+      });
+
+      if (current) {
+        setActiveSection(current);
+      }
+    };
+
+    const onScrollOrResize = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        updateActiveSection();
+      });
+    };
+
+    const waitForSections = () => {
+      if (cancelled) return;
+      const ready = LANDING_SECTIONS.every((id) => document.getElementById(id));
+      if (!ready) {
+        rafId = requestAnimationFrame(waitForSections);
+        return;
+      }
+      updateActiveSection();
+      window.addEventListener('scroll', onScrollOrResize, { passive: true });
+      window.addEventListener('resize', onScrollOrResize);
+    };
+
+    waitForSections();
+
+    return () => {
+      cancelled = true;
+      if (rafId) cancelAnimationFrame(rafId);
+      window.removeEventListener('scroll', onScrollOrResize);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
   }, [location.pathname]);
 
   const scrollToSection = (sectionId) => {
@@ -21,6 +101,7 @@ function Navbar() {
 
     const element = document.getElementById(sectionId);
     if (element) {
+      setActiveSection(sectionId);
       element.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
@@ -30,6 +111,9 @@ function Navbar() {
   };
 
   const closeMenu = () => setMenuOpen(false);
+
+  const sectionLinkClass = (sectionId) =>
+    `navbar-link${activeSection === sectionId ? ' navbar-link-active' : ''}`;
 
   return (
     <header className="navbar">
@@ -81,7 +165,8 @@ function Navbar() {
 
             <button
               type="button"
-              className="navbar-link"
+              className={sectionLinkClass('projects-section')}
+              aria-current={activeSection === 'projects-section' ? 'true' : undefined}
               onClick={() => scrollToSection('projects-section')}
             >
               {t('navbar.projects')}
@@ -89,7 +174,17 @@ function Navbar() {
 
             <button
               type="button"
-              className="navbar-link"
+              className={sectionLinkClass('education-section')}
+              aria-current={activeSection === 'education-section' ? 'true' : undefined}
+              onClick={() => scrollToSection('education-section')}
+            >
+              {t('navbar.education')}
+            </button>
+
+            <button
+              type="button"
+              className={sectionLinkClass('contact-section')}
+              aria-current={activeSection === 'contact-section' ? 'true' : undefined}
               onClick={() => scrollToSection('contact-section')}
             >
               {t('navbar.contact')}

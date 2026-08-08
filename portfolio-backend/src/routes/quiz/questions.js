@@ -1,7 +1,8 @@
 const express = require("express");
 const { GetCommand, QueryCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { ddb } = require("../../config/dynamo");
-const { getAnonId, pickLang } = require("../../utils/quizHelpers");
+const { getAnonId } = require("../../utils/quizHelpers");
+const { formatQuestionForClient } = require("../../utils/quizQuestionFormat");
 const { INTERVIEW_QUESTION_COUNT } = require("../../utils/quizConstants");
 const logger = require("../../utils/logger");
 const { mapDynamoError } = require("../../utils/mapDynamoError");
@@ -27,6 +28,7 @@ async function fetchQuestionPool(category, difficulty) {
         ":diff": difficulty,
         ":trueVal": true,
       },
+      // explanation is used only to compute hasExplanation; never returned to client
       ProjectionExpression: "questionId, category, difficulty, questionText, answers, explanation, isActive",
     })
   );
@@ -37,22 +39,17 @@ function pickRandom(items) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-function formatQuestion(item, lang) {
-  const questionText = pickLang(item.questionText, lang);
-  const answers = pickLang(item.answers, lang);
-  if (!questionText || !Array.isArray(answers) || answers.length !== 4) {
-    return null;
-  }
+const QUESTION_PROJECTION =
+  "questionId, category, difficulty, questionText, answers, explanation, isActive";
+
+function buildNextResponse(session, formatted, askedLength, reshuffled) {
   return {
-    questionId: item.questionId,
-    category: item.category,
-    difficulty: item.difficulty,
-    questionText,
-    answers,
-    hasExplanation: !!pickLang(item.explanation, lang),
-    questionTextI18n: item.questionText,
-    answersI18n: item.answers,
-    explanationI18n: item.explanation,
+    ok: true,
+    ...formatted,
+    questionNumber: session.mode === "interview" ? askedLength + 1 : session.questionIndex,
+    totalQuestions: session.mode === "interview" ? INTERVIEW_QUESTION_COUNT : null,
+    timePerQuestion: session.mode === "interview" ? session.timePerQuestion : null,
+    reshuffled: !!reshuffled,
   };
 }
 
@@ -83,6 +80,24 @@ router.get("/next", async (req, res) => {
 
     const asked = Array.isArray(session.askedQuestionIds) ? [...session.askedQuestionIds] : [];
     const wrongQueue = Array.isArray(session.wrongQueue) ? [...session.wrongQueue] : [];
+
+    // Resume unanswered current question (refresh / parallel /next)
+    if (session.lastQuestionId) {
+      const currentOut = await ddb.send(
+        new GetCommand({
+          TableName: QUESTIONS_TABLE,
+          Key: { questionId: session.lastQuestionId },
+          ProjectionExpression: QUESTION_PROJECTION,
+        })
+      );
+      if (currentOut.Item && currentOut.Item.isActive !== false) {
+        const formattedCurrent = formatQuestionForClient(currentOut.Item, lang);
+        if (formattedCurrent) {
+          return res.json(buildNextResponse(session, formattedCurrent, asked.length, false));
+        }
+      }
+    }
+
     let reshuffled = false;
     let chosen = null;
     let nextWrongQueue = wrongQueue;
@@ -95,7 +110,7 @@ router.get("/next", async (req, res) => {
         new GetCommand({
           TableName: QUESTIONS_TABLE,
           Key: { questionId },
-          ProjectionExpression: "questionId, category, difficulty, questionText, answers, explanation, isActive",
+          ProjectionExpression: QUESTION_PROJECTION,
         })
       );
       if (qOut.Item && qOut.Item.isActive !== false) {
@@ -124,7 +139,7 @@ router.get("/next", async (req, res) => {
       chosen = pickRandom(available);
     }
 
-    const formatted = formatQuestion(chosen, lang);
+    const formatted = formatQuestionForClient(chosen, lang);
     if (!formatted) {
       return res.status(500).json({ ok: false, error: "invalid_question_data" });
     }
@@ -132,33 +147,68 @@ router.get("/next", async (req, res) => {
     const updateValues = {
       ":qid": chosen.questionId,
       ":wrongQueue": nextWrongQueue,
+      ":sid": session.sessionId,
     };
     let updateExpression = "SET sessionCurrent.lastQuestionId = :qid, sessionCurrent.wrongQueue = :wrongQueue";
+    // Only claim a new current question when none is pending (or same id / cleared stale)
+    let conditionExpression =
+      "attribute_exists(sessionCurrent) AND sessionCurrent.sessionId = :sid AND attribute_not_exists(sessionCurrent.lastQuestionId)";
+
+    if (session.lastQuestionId) {
+      // Stale/invalid lastQuestionId from earlier — allow replace of that id only
+      conditionExpression =
+        "attribute_exists(sessionCurrent) AND sessionCurrent.sessionId = :sid AND (attribute_not_exists(sessionCurrent.lastQuestionId) OR sessionCurrent.lastQuestionId = :staleQid)";
+      updateValues[":staleQid"] = session.lastQuestionId;
+    }
 
     if (reshuffled) {
       updateExpression += ", sessionCurrent.askedQuestionIds = :asked";
       updateValues[":asked"] = [];
     }
 
-    await ddb.send(
-      new UpdateCommand({
-        TableName: USERS_TABLE,
-        Key: { anonId },
-        UpdateExpression: updateExpression,
-        ExpressionAttributeValues: updateValues,
-      })
-    );
+    try {
+      await ddb.send(
+        new UpdateCommand({
+          TableName: USERS_TABLE,
+          Key: { anonId },
+          UpdateExpression: updateExpression,
+          ConditionExpression: conditionExpression,
+          ExpressionAttributeValues: updateValues,
+        })
+      );
+    } catch (err) {
+      if (err.name === "ConditionalCheckFailedException") {
+        // Another /next won the race — return whatever is now current
+        const again = await ddb.send(
+          new GetCommand({
+            TableName: USERS_TABLE,
+            Key: { anonId },
+            ProjectionExpression: "sessionCurrent",
+          })
+        );
+        const s2 = again.Item?.sessionCurrent;
+        if (s2?.lastQuestionId) {
+          const qOut = await ddb.send(
+            new GetCommand({
+              TableName: QUESTIONS_TABLE,
+              Key: { questionId: s2.lastQuestionId },
+              ProjectionExpression: QUESTION_PROJECTION,
+            })
+          );
+          if (qOut.Item) {
+            const fmt = formatQuestionForClient(qOut.Item, lang);
+            if (fmt) {
+              const asked2 = Array.isArray(s2.askedQuestionIds) ? s2.askedQuestionIds.length : asked.length;
+              return res.json(buildNextResponse(s2, fmt, asked2, false));
+            }
+          }
+        }
+        return res.status(409).json({ ok: false, error: "question_race_conflict" });
+      }
+      throw err;
+    }
 
-    const response = {
-      ok: true,
-      ...formatted,
-      questionNumber: session.mode === "interview" ? asked.length + 1 : session.questionIndex,
-      totalQuestions: session.mode === "interview" ? INTERVIEW_QUESTION_COUNT : null,
-      timePerQuestion: session.mode === "interview" ? session.timePerQuestion : null,
-      reshuffled,
-    };
-
-    return res.json(response);
+    return res.json(buildNextResponse(session, formatted, asked.length, reshuffled));
   } catch (err) {
     const error = mapDynamoError(err);
     logger.error("quiz_next_question_failed", { message: err.message, error });

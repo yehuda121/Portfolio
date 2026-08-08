@@ -124,20 +124,26 @@ const QuizPage = () => {
     setQuestion(result.data);
     setLoading(false);
 
-    if (session?.mode === "interview" && result.data.timePerQuestion) {
+    // Use /next payload only — do not read React session state (stale after setSession).
+    // Backend sets timePerQuestion for interview; practice returns null.
+    if (result.data.timePerQuestion) {
       setTimeLeft(result.data.timePerQuestion);
     }
-  }, [headers, lang, resolveApiError, session?.mode, clearTimer, t]);
+  }, [headers, lang, resolveApiError, clearTimer, t]);
 
   useEffect(() => {
-    if (session?.mode !== "interview" || timeLeft === null || selectedIndex !== null) return undefined;
+    if (session?.mode !== "interview" || selectedIndex !== null || !question?.questionId) {
+      return undefined;
+    }
 
     timerRef.current = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev === null) return prev;
         if (prev <= 1) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+          }
           return 0;
         }
         return prev - 1;
@@ -145,9 +151,12 @@ const QuizPage = () => {
     }, 1000);
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     };
-  }, [session?.mode, timeLeft, selectedIndex, question?.questionId]);
+  }, [session?.mode, selectedIndex, question?.questionId]);
 
   const handleTimeout = useCallback(async () => {
     if (!headers || !question || timeoutSubmittedRef.current) return;
@@ -337,14 +346,27 @@ const QuizPage = () => {
   }, [question, lang]);
 
   useEffect(() => {
-    if (!question?.explanationI18n) return;
+    // After an answer, re-fetch explanation in the active language (never from /next payload)
+    if (!headers || !question?.questionId || selectedIndex === null) return;
     const shouldShow =
       showExplanation ||
-      (selectedIndex !== null && answerResult?.autoShowExplanation);
+      (answerResult?.autoShowExplanation);
     if (!shouldShow) return;
-    const text = question.explanationI18n[lang] ?? question.explanationI18n.en ?? null;
-    if (text) setExplanation(text);
-  }, [lang, question, showExplanation, selectedIndex, answerResult?.autoShowExplanation]);
+
+    let cancelled = false;
+    (async () => {
+      const result = await fetchQuizExplanation(headers, {
+        questionId: question.questionId,
+        lang,
+      });
+      if (cancelled || !result.ok || !result.data) return;
+      setExplanation(result.data.explanation);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lang, question?.questionId, showExplanation, selectedIndex, answerResult?.autoShowExplanation, headers]);
 
   return (
     <div className="quiz-page" dir={isRtl ? "rtl" : "ltr"}>

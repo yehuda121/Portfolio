@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const { UpdateCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
 const { ddb } = require("../../config/dynamo");
 const { getAnonId, pickLang, calcExpiresAtDays } = require("../../utils/quizHelpers");
+const { applyAnswerToSession } = require("../../utils/quizSessionState");
 const {
   VALID_CATEGORIES,
   VALID_DIFFICULTIES,
@@ -177,12 +178,12 @@ router.post("/answer", async (req, res) => {
     const session = userOut.Item?.sessionCurrent;
     if (!session) return res.status(400).json({ ok: false, error: "no_active_session" });
 
-    if (session.lastQuestionId && session.lastQuestionId !== questionId) {
+    if (!session.lastQuestionId || session.lastQuestionId !== questionId) {
       return res.status(400).json({ ok: false, error: "question_not_current" });
     }
 
-    const asked = Array.isArray(session.askedQuestionIds) ? session.askedQuestionIds : [];
-    if (asked.includes(questionId)) {
+    const previouslyAsked = Array.isArray(session.askedQuestionIds) ? session.askedQuestionIds : [];
+    if (previouslyAsked.includes(questionId)) {
       return res.status(400).json({ ok: false, error: "question_already_answered" });
     }
 
@@ -196,14 +197,23 @@ router.post("/answer", async (req, res) => {
     const nowIso = new Date().toISOString();
     const expiresAt = calcExpiresAtDays(30);
 
-    const newCorrectCount = session.correctCount + (isCorrect ? 1 : 0);
-    const newWrongCount = session.wrongCount + (!isCorrect && !isTimeout ? 1 : 0);
-    const newTimeoutCount = session.timeoutCount + (isTimeout ? 1 : 0);
-    const newQuestionIndex = session.questionIndex + 1;
-    const wrongQueue = Array.isArray(session.wrongQueue) ? [...session.wrongQueue] : [];
-    const results = Array.isArray(session.results) ? [...session.results] : [];
+    const transition = applyAnswerToSession(session, {
+      questionId,
+      isCorrect,
+      isTimeout,
+    });
+    const {
+      asked,
+      wrongQueue,
+      results,
+      newCorrectCount,
+      newWrongCount,
+      newTimeoutCount,
+      newQuestionIndex,
+      pushWrong,
+    } = transition;
 
-    if (session.mode === "practice" && !isCorrect) {
+    if (pushWrong) {
       wrongQueue.push(questionId);
     }
 
@@ -214,12 +224,17 @@ router.post("/answer", async (req, res) => {
     const interviewFinished =
       session.mode === "interview" && asked.length + 1 >= INTERVIEW_QUESTION_COUNT;
 
+    const answerCondition =
+      "attribute_exists(sessionCurrent) AND sessionCurrent.sessionId = :sid AND sessionCurrent.lastQuestionId = :qid";
+
     if (session.mode === "practice" || !interviewFinished) {
-      const out = await ddb.send(
-        new UpdateCommand({
-          TableName: USERS_TABLE,
-          Key: { anonId },
-          UpdateExpression: `
+      let out;
+      try {
+        out = await ddb.send(
+          new UpdateCommand({
+            TableName: USERS_TABLE,
+            Key: { anonId },
+            UpdateExpression: `
             SET lastSeenAt = :lastSeenAt,
                 expiresAt = :expiresAt,
                 sessionCurrent.questionIndex = :qIndex,
@@ -231,21 +246,30 @@ router.post("/answer", async (req, res) => {
                 sessionCurrent.results = :results
             REMOVE sessionCurrent.lastQuestionId
           `,
-          ExpressionAttributeValues: {
-            ":lastSeenAt": nowIso,
-            ":expiresAt": expiresAt,
-            ":qIndex": newQuestionIndex,
-            ":cCount": newCorrectCount,
-            ":wCount": newWrongCount,
-            ":tCount": newTimeoutCount,
-            ":emptyList": [],
-            ":qidList": [questionId],
-            ":wrongQueue": wrongQueue,
-            ":results": results,
-          },
-          ReturnValues: "ALL_NEW",
-        })
-      );
+            ConditionExpression: answerCondition,
+            ExpressionAttributeValues: {
+              ":lastSeenAt": nowIso,
+              ":expiresAt": expiresAt,
+              ":qIndex": newQuestionIndex,
+              ":cCount": newCorrectCount,
+              ":wCount": newWrongCount,
+              ":tCount": newTimeoutCount,
+              ":emptyList": [],
+              ":qidList": [questionId],
+              ":wrongQueue": wrongQueue,
+              ":results": results,
+              ":sid": session.sessionId,
+              ":qid": questionId,
+            },
+            ReturnValues: "ALL_NEW",
+          })
+        );
+      } catch (err) {
+        if (err.name === "ConditionalCheckFailedException") {
+          return res.status(409).json({ ok: false, error: "question_already_answered" });
+        }
+        throw err;
+      }
 
       const response = {
         ok: true,
@@ -293,11 +317,13 @@ router.post("/answer", async (req, res) => {
     while (nextScores.length > 50) nextScores.shift();
     while (nextTimes.length > 50) nextTimes.shift();
 
-    const out2 = await ddb.send(
-      new UpdateCommand({
-        TableName: USERS_TABLE,
-        Key: { anonId },
-        UpdateExpression: `
+    let out2;
+    try {
+      out2 = await ddb.send(
+        new UpdateCommand({
+          TableName: USERS_TABLE,
+          Key: { anonId },
+          UpdateExpression: `
           SET lastSeenAt = :lastSeenAt,
               expiresAt = :expiresAt,
               historyScores = :historyScores,
@@ -305,16 +331,25 @@ router.post("/answer", async (req, res) => {
               lastSessionSummary = :summary
           REMOVE sessionCurrent
         `,
-        ExpressionAttributeValues: {
-          ":lastSeenAt": nowIso,
-          ":expiresAt": expiresAt,
-          ":historyScores": nextScores,
-          ":historyTimestamps": nextTimes,
-          ":summary": summary,
-        },
-        ReturnValues: "ALL_NEW",
-      })
-    );
+          ConditionExpression: answerCondition,
+          ExpressionAttributeValues: {
+            ":lastSeenAt": nowIso,
+            ":expiresAt": expiresAt,
+            ":historyScores": nextScores,
+            ":historyTimestamps": nextTimes,
+            ":summary": summary,
+            ":sid": session.sessionId,
+            ":qid": questionId,
+          },
+          ReturnValues: "ALL_NEW",
+        })
+      );
+    } catch (err) {
+      if (err.name === "ConditionalCheckFailedException") {
+        return res.status(409).json({ ok: false, error: "question_already_answered" });
+      }
+      throw err;
+    }
 
     return res.json({
       ok: true,

@@ -45,6 +45,9 @@ jobs:
       - name: Syntax check
         run: npm run check
 
+      - name: Unit tests
+        run: npm test
+
   frontend-check:
     name: Frontend — test & build
     runs-on: ubuntu-latest
@@ -111,7 +114,24 @@ jobs:
       - name: Create deployment package
         run: |
           zip -r function.zip . \
-            -x ".git/*" ".github/*"
+            -x ".git/*" \
+            -x ".github/*" \
+            -x ".env" \
+            -x ".env.*" \
+            -x "*.env" \
+            -x "*serviceAccount*" \
+            -x "*adminsdk*" \
+            -x "Dockerfile" \
+            -x "docker-compose*" \
+            -x "*.md" \
+            -x "src/scripts/*" \
+            -x "coverage/*" \
+            -x "test/*" \
+            -x "tests/*" \
+            -x "**/*.test.js" \
+            -x "**/*.spec.js" \
+            -x "function.zip" \
+            -x "lambda.zip"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -131,6 +151,8 @@ jobs:
     needs:
       - backend-check
       - frontend-check
+    outputs:
+      firebase_outcome: ${{ steps.firebase_deploy.outcome }}
 
     steps:
       - name: Checkout
@@ -142,7 +164,20 @@ jobs:
           name: frontend-build
           path: portfolio-frontend/build
 
+      # Intentionally allowed to continue:
+      # Firebase Hosting may occasionally return a non-critical failure/no-op
+      # condition (for example "current active version") when a push is
+      # effectively backend-only or the Hosting release is already live.
+      # Without continue-on-error, that condition can block backend deploy
+      # reporting / overall workflow success even when Lambda updated fine.
+      #
+      # Job output firebase_outcome still records the real step outcome so
+      # notifications do not claim Hosting succeeded when it did not.
+      #
+      # If Firebase starts hiding real Hosting failures, disable
+      # continue-on-error temporarily while diagnosing the deployment.
       - name: Deploy to Firebase Hosting
+        id: firebase_deploy
         uses: FirebaseExtended/action-hosting-deploy@v0
         continue-on-error: true
         with:
@@ -151,6 +186,16 @@ jobs:
           projectId: ${{ vars.FIREBASE_PROJECT_ID }}
           channelId: live
           entryPoint: ./portfolio-frontend
+
+      - name: Report Firebase deploy outcome
+        run: |
+          OUTCOME="${{ steps.firebase_deploy.outcome }}"
+          echo "firebase_outcome=${OUTCOME}"
+          if [ "$OUTCOME" = "success" ]; then
+            echo "Firebase Hosting deploy succeeded."
+          else
+            echo "::warning::Firebase Hosting deploy step outcome=${OUTCOME}. Workflow continues so backend deploy is not blocked; notifications will report Hosting as not successful."
+          fi
 
   # ---------------------------------------------------------------------------
   # Email notification (success or failure)
@@ -184,6 +229,7 @@ jobs:
           || env.DEPLOY_NOTIFY_EMAIL == '' }}
         run: echo "SMTP secrets not configured; skipping email notification."
 
+      # Full success: checks + Lambda + Firebase step outcome all succeeded
       - name: Send success email
         if: >-
           ${{ env.SMTP_SERVER != ''
@@ -195,7 +241,8 @@ jobs:
           && needs.backend-check.result == 'success'
           && needs.frontend-check.result == 'success'
           && needs.deploy-backend.result == 'success'
-          && needs.deploy-frontend.result == 'success' }}
+          && needs.deploy-frontend.result == 'success'
+          && needs.deploy-frontend.outputs.firebase_outcome == 'success' }}
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ env.SMTP_SERVER }}
@@ -217,7 +264,50 @@ jobs:
             - Backend validate: ${{ needs.backend-check.result }}
             - Frontend test & build: ${{ needs.frontend-check.result }}
             - Backend deploy (Lambda): ${{ needs.deploy-backend.result }}
-            - Frontend deploy (Firebase): ${{ needs.deploy-frontend.result }}
+            - Frontend deploy job: ${{ needs.deploy-frontend.result }}
+            - Firebase Hosting step outcome: ${{ needs.deploy-frontend.outputs.firebase_outcome }}
+
+      # Lambda OK, but Firebase step did not succeed (continue-on-error soft-fail)
+      - name: Send partial success email (backend OK, Firebase not successful)
+        if: >-
+          ${{ env.SMTP_SERVER != ''
+          && env.SMTP_PORT != ''
+          && env.SMTP_USERNAME != ''
+          && env.SMTP_PASSWORD != ''
+          && env.SMTP_FROM != ''
+          && env.DEPLOY_NOTIFY_EMAIL != ''
+          && needs.backend-check.result == 'success'
+          && needs.frontend-check.result == 'success'
+          && needs.deploy-backend.result == 'success'
+          && needs.deploy-frontend.result == 'success'
+          && needs.deploy-frontend.outputs.firebase_outcome != 'success' }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ env.SMTP_SERVER }}
+          server_port: ${{ env.SMTP_PORT }}
+          username: ${{ env.SMTP_USERNAME }}
+          password: ${{ env.SMTP_PASSWORD }}
+          subject: "[Portfolio] Partial deployment — Lambda OK, Firebase not successful"
+          to: ${{ env.DEPLOY_NOTIFY_EMAIL }}
+          from: ${{ env.SMTP_FROM }}
+          body: |
+            Backend (Lambda) deployed successfully, but Firebase Hosting did not report success.
+
+            The Firebase step uses continue-on-error so backend-only / no-op Hosting
+            conditions do not block Lambda. Review Hosting logs before assuming the
+            live site was updated.
+
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Job results:
+            - Backend validate: ${{ needs.backend-check.result }}
+            - Frontend test & build: ${{ needs.frontend-check.result }}
+            - Backend deploy (Lambda): ${{ needs.deploy-backend.result }}
+            - Frontend deploy job: ${{ needs.deploy-frontend.result }}
+            - Firebase Hosting step outcome: ${{ needs.deploy-frontend.outputs.firebase_outcome }}
 
       - name: Send failure email
         if: >-
@@ -252,6 +342,7 @@ jobs:
             - Backend validate: ${{ needs.backend-check.result }}
             - Frontend test & build: ${{ needs.frontend-check.result }}
             - Backend deploy (Lambda): ${{ needs.deploy-backend.result }}
-            - Frontend deploy (Firebase): ${{ needs.deploy-frontend.result }}
+            - Frontend deploy job: ${{ needs.deploy-frontend.result }}
+            - Firebase Hosting step outcome: ${{ needs.deploy-frontend.outputs.firebase_outcome }}
 
             Review the workflow logs for details.

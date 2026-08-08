@@ -1,11 +1,10 @@
-const { PutCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
+const { UpdateCommand, GetCommand } = require("@aws-sdk/lib-dynamodb");
 const { ddb } = require("../../config/dynamo");
 const logger = require("../../utils/logger");
 const { mapDynamoError } = require("../../utils/mapDynamoError");
+const { PK_VALUE, SK_VALUE, buildSnakeBestScoreUpdateParams } = require("../../utils/snakeScoreUpdate");
 
 const TABLE = process.env.SNAKE_BEST_SCORE_TABLE || "snake_bestScore";
-const PK_VALUE = "snake";
-const SK_VALUE = "global";
 const MAX_SCORE = 100000;
 
 module.exports = async function submitScore(req, res) {
@@ -16,6 +15,19 @@ module.exports = async function submitScore(req, res) {
       return res.status(400).json({ ok: false, error: "invalid_score" });
     }
 
+    const nowIso = new Date().toISOString();
+
+    try {
+      await ddb.send(
+        new UpdateCommand(buildSnakeBestScoreUpdateParams(TABLE, score, nowIso))
+      );
+    } catch (err) {
+      if (err.name !== "ConditionalCheckFailedException") {
+        throw err;
+      }
+      // Lower or equal score — keep existing best
+    }
+
     const currentRes = await ddb.send(
       new GetCommand({
         TableName: TABLE,
@@ -23,24 +35,8 @@ module.exports = async function submitScore(req, res) {
       })
     );
 
-    const currentBest = Number(currentRes.Item?.bestScore ?? 0) || 0;
-    const newBest = Math.max(score, currentBest);
-
-    if (newBest !== currentBest) {
-      await ddb.send(
-        new PutCommand({
-          TableName: TABLE,
-          Item: {
-            pk: PK_VALUE,
-            sk: SK_VALUE,
-            bestScore: newBest,
-            updatedAt: new Date().toISOString(),
-          },
-        })
-      );
-    }
-
-    return res.json({ ok: true, bestScore: newBest });
+    const bestScore = Number(currentRes.Item?.bestScore ?? score) || score;
+    return res.json({ ok: true, bestScore });
   } catch (err) {
     const error = mapDynamoError(err);
     logger.error("snake_submit_score_failed", { message: err.message, error });

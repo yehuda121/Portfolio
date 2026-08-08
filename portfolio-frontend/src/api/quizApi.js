@@ -16,6 +16,37 @@ export function quizAdminHeaders() {
   };
 }
 
+/** @type {Set<() => void>} */
+const adminUnauthorizedListeners = new Set();
+
+/** Subscribe to admin 401 events (clears UI auth). Returns unsubscribe. */
+export function subscribeAdminUnauthorized(listener) {
+  if (typeof listener !== "function") return () => {};
+  adminUnauthorizedListeners.add(listener);
+  return () => {
+    adminUnauthorizedListeners.delete(listener);
+  };
+}
+
+function notifyAdminUnauthorized() {
+  adminUnauthorizedListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      // ignore listener errors
+    }
+  });
+}
+
+async function adminApiFetch(path, options = {}) {
+  const result = await apiFetch(path, options);
+  if (result.status === 401) {
+    setQuizAdminToken("");
+    notifyAdminUnauthorized();
+  }
+  return result;
+}
+
 export async function fetchQuizSession(headers) {
   return apiFetch("/api/quiz/session/current", { headers });
 }
@@ -48,10 +79,6 @@ export async function fetchQuizExplanation(headers, body) {
   });
 }
 
-export async function fetchQuizSummary(headers) {
-  return apiFetch("/api/quiz/session/summary", { headers });
-}
-
 export async function adminLogin(password) {
   return apiFetch("/api/quiz/admin/login", {
     method: "POST",
@@ -60,11 +87,11 @@ export async function adminLogin(password) {
 }
 
 export async function adminCheckAuth() {
-  return apiFetch("/api/quiz/admin/me", { headers: quizAdminHeaders() });
+  return adminApiFetch("/api/quiz/admin/me", { headers: quizAdminHeaders() });
 }
 
 export async function adminLogout() {
-  return apiFetch("/api/quiz/admin/logout", {
+  return adminApiFetch("/api/quiz/admin/logout", {
     method: "POST",
     headers: quizAdminHeaders(),
   });
@@ -76,13 +103,13 @@ export async function adminListQuestions(params = {}) {
     if (v !== undefined && v !== null && v !== "") qs.set(k, v);
   });
   const query = qs.toString();
-  return apiFetch(`/api/quiz/admin/questions${query ? `?${query}` : ""}`, {
+  return adminApiFetch(`/api/quiz/admin/questions${query ? `?${query}` : ""}`, {
     headers: quizAdminHeaders(),
   });
 }
 
 export async function adminCreateQuestion(question) {
-  return apiFetch("/api/quiz/admin/questions", {
+  return adminApiFetch("/api/quiz/admin/questions", {
     method: "POST",
     headers: quizAdminHeaders(),
     body: JSON.stringify(question),
@@ -90,7 +117,7 @@ export async function adminCreateQuestion(question) {
 }
 
 export async function adminUpdateQuestion(questionId, question) {
-  return apiFetch(`/api/quiz/admin/questions/${encodeURIComponent(questionId)}`, {
+  return adminApiFetch(`/api/quiz/admin/questions/${encodeURIComponent(questionId)}`, {
     method: "PUT",
     headers: quizAdminHeaders(),
     body: JSON.stringify(question),
@@ -98,21 +125,21 @@ export async function adminUpdateQuestion(questionId, question) {
 }
 
 export async function adminDeleteQuestion(questionId) {
-  return apiFetch(`/api/quiz/admin/questions/${encodeURIComponent(questionId)}`, {
+  return adminApiFetch(`/api/quiz/admin/questions/${encodeURIComponent(questionId)}`, {
     method: "DELETE",
     headers: quizAdminHeaders(),
   });
 }
 
 export async function adminToggleQuestionActive(questionId) {
-  return apiFetch(`/api/quiz/admin/questions/${encodeURIComponent(questionId)}/toggle-active`, {
+  return adminApiFetch(`/api/quiz/admin/questions/${encodeURIComponent(questionId)}/toggle-active`, {
     method: "PATCH",
     headers: quizAdminHeaders(),
   });
 }
 
 export async function adminCharacterChat(body) {
-  return apiFetch("/api/quiz/admin/character-chat", {
+  return adminApiFetch("/api/quiz/admin/character-chat", {
     method: "POST",
     headers: quizAdminHeaders(),
     body: JSON.stringify(body),

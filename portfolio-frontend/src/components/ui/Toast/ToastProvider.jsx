@@ -26,8 +26,6 @@ export function ToastProvider({ children }) {
       showToast,
       showSuccess: (msg) => showToast(msg, "success"),
       showError: (msg) => showToast(msg, "error"),
-      showWarning: (msg) => showToast(msg, "warning"),
-      showInfo: (msg) => showToast(msg, "info"),
     }),
     [showToast]
   );

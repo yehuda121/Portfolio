@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const { UpdateCommand, GetCommand, DeleteCommand } = require("@aws-sdk/lib-dynamodb");
 const { ddb } = require("../../config/dynamo");
 const { getAnonId, calcExpiresAtDays } = require("../../utils/quizHelpers");
+const { requireAdmin } = require("../../utils/adminAuth");
 const logger = require("../../utils/logger");
 
 const router = express.Router();
@@ -71,7 +72,8 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.delete("/", async (req, res) => {
+// Destructive — admin only (previously any client with an anon id could wipe user rows)
+router.delete("/", requireAdmin, async (req, res) => {
   try {
     if (!TABLE || !process.env.AWS_REGION_DB) {
       return res.status(500).json({ ok: false, error: "server_misconfigured" });

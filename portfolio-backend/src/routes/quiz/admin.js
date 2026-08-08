@@ -7,7 +7,7 @@ const {
   DeleteCommand,
 } = require("@aws-sdk/lib-dynamodb");
 const { ddb } = require("../../config/dynamo");
-const { createAdminToken, verifyAdminToken, requireAdmin, getAdminPassword } = require("../../utils/adminAuth");
+const { createAdminToken, verifyAdminToken, requireAdmin, getAdminPassword, safeEqualString, checkLoginRateLimit, clearLoginRateLimit } = require("../../utils/adminAuth");
 const { validateQuestion } = require("../../utils/validateQuestion");
 const { VALID_CATEGORIES, VALID_DIFFICULTIES } = require("../../utils/quizConstants");
 const logger = require("../../utils/logger");
@@ -53,12 +53,22 @@ router.post("/login", (req, res) => {
     return res.status(503).json({ ok: false, error: "admin_not_configured" });
   }
 
+  const rate = checkLoginRateLimit(req);
+  if (!rate.allowed) {
+    res.setHeader("Retry-After", String(Math.ceil((rate.retryAfterMs || 0) / 1000) || 60));
+    return res.status(429).json({ ok: false, error: "too_many_attempts" });
+  }
+
   const { password: submitted } = req.body || {};
-  if (!submitted || submitted !== password) {
+  if (!submitted || !safeEqualString(submitted, password)) {
     return res.status(401).json({ ok: false, error: "invalid_password" });
   }
 
+  clearLoginRateLimit(req);
   const token = createAdminToken();
+  if (!token) {
+    return res.status(503).json({ ok: false, error: "admin_not_configured" });
+  }
   return res.json({ ok: true, token });
 });
 

@@ -1,16 +1,25 @@
 .navbar {
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 40;
+  left: 0;
+  right: 0;
+  z-index: 100;
   width: 100%;
   backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   background: linear-gradient(
     to right,
-    rgba(15, 23, 42, 0.96),
-    rgba(15, 23, 42, 0.86)
+    rgba(15, 23, 42, 0.98),
+    rgba(15, 23, 42, 0.92)
   );
   border-bottom: 1px solid rgba(30, 64, 175, 0.6);
   direction: ltr;
+}
+
+/* Offset page content so the fixed navbar does not cover the hero / headings */
+.app-main {
+  padding-top: 3.25rem;
+  background: #020617;
 }
 
 .navbar-inner {
@@ -73,7 +82,8 @@
     transform 0.07s ease, box-shadow 0.15s ease;
 }
 
-.navbar-link:hover {
+.navbar-link:hover,
+.navbar-link-active {
   background-color: rgba(15, 23, 42, 0.9);
   color: #7dd3fc;
   box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.6);

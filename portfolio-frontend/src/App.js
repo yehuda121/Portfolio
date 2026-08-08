@@ -59,7 +59,9 @@ function App() {
     <BrowserRouter>
       <ToastProvider>
         <Navbar />
-        <AppRoutes />
+        <div className="app-main">
+          <AppRoutes />
+        </div>
       </ToastProvider>
     </BrowserRouter>
   );

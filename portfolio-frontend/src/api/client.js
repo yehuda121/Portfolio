@@ -1,9 +1,5 @@
 const BASE_URL = (process.env.REACT_APP_API_BASE_URL || "").replace(/\/$/, "");
 
-export function getApiBaseUrl() {
-  return BASE_URL;
-}
-
 export function isApiConfigured() {
   return Boolean(BASE_URL);
 }
